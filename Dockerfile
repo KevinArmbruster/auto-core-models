@@ -10,13 +10,11 @@ RUN apt-get clean && \
     apt-get install -y wget && \
     apt-get install -y python3-dev 
 
+WORKDIR /workdir/data
+RUN wget https://www.cs.ucr.edu/~eamonn/time_series_data_2018/UCRArchive_2018.zip
+RUN unzip -P someone UCRArchive_2018.zip
+
 WORKDIR /workdir
-
-
-# nvm install, load
-# RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
-# RUN export NVM_DIR="$([ -z "${XDG_CONFIG_HOME-}" ] && printf %s "${HOME}/.nvm" || printf %s "${XDG_CONFIG_HOME}/nvm")" [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-
 
 RUN git clone https://github.com/KevinArmbruster/auto-core-models.git
 RUN git config --global user.name "Kevin Armbruster"
@@ -32,7 +30,7 @@ RUN pip install protobuf==3.20.*
 
 
 #EXPOSE 8090
-ENTRYPOINT ["tail", "-f", "/dev/null"]
+ENTRYPOINT ["sleep", "infinity"]
 
 # SETUP INSTRUCTIONS
 # mkdir -p ~/auto-core-models/data
