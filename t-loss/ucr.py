@@ -25,6 +25,8 @@ import pandas
 import argparse
 
 import scikit_wrappers
+import networks
+import losses
 
 
 def load_UCR_dataset(path, dataset):
@@ -135,6 +137,78 @@ def fit_hyperparameters(file, train, train_labels, cuda, gpu,
         train, train_labels, save_memory=save_memory, verbose=True
     )
 
+def modelsearch(file, train, train_labels, cuda, gpu):
+    
+    # Loads a given set of hyperparameters and fits a model with those
+    hf = open(os.path.join(file), 'r')
+    params = json.load(hf)
+    hf.close()
+    # Check the number of input channels
+    params['in_channels'] = numpy.shape(train)[1]
+    params['cuda'] = cuda
+    params['gpu'] = gpu
+    
+    model_space = networks.searchspace_causal_cnn.CausalCNNEncoder(params['in_channels'], 
+                                                                   params['channels'], 
+                                                                   params['depth'], 
+                                                                   params['reduced_size'], 
+                                                                   params['out_channels'], 
+                                                                   params['kernel_size'])
+    
+    loss_func = losses.triplet_loss.TripletLoss(params['compared_length'], 
+                              params['nb_random_samples'], 
+                              params['negative_penalty'])
+    
+    from torch.utils.data import TensorDataset, DataLoader
+    import nni
+    # Dataset = nni.trace(Dataset)
+    DataLoader = nni.trace(DataLoader)
+    
+    train_torch_dataset = TensorDataset(torch.from_numpy(train))
+    train_loader = DataLoader(train_torch_dataset, batch_size=params['batch_size'], shuffle=True)
+    optimizer = torch.optim.Adam(model_space.parameters(), lr=params['lr'])
+    
+    def fit(model, dataloader, dataset, optimizer, loss_func, nb_steps, verbose=True, cuda=True, gpu=14):
+        while i < nb_steps:
+            if verbose:
+                print('Encoder Epoch: ', epochs + 1)
+            for batch in dataloader:
+                if cuda:
+                    batch = batch.cuda(gpu)
+                optimizer.zero_grad()
+                
+                loss = loss_func(batch, model, dataset, save_memory=False)
+                
+                loss.backward()
+                optimizer.step()
+                
+                i += 1
+            epochs += 1
+        nni.report_final_result(loss)
+
+    from nni.nas.evaluator import FunctionalEvaluator
+    evaluator = FunctionalEvaluator(fit, dataloader=train_loader, dataset=train_torch_dataset, optimizer=optimizer, loss_func=loss_func, nb_steps=params['nb_steps'])
+
+    from nni.nas.strategy import DARTS, GumbelDARTS
+    strategy = DARTS()
+    
+    from nni.nas.experiment import NasExperiment
+    experiment = NasExperiment(model_space, evaluator, strategy)
+    experiment.run()
+    
+    exported_arch = experiment.export_top_models(formatter='dict')[0]
+
+    from nni.nas.space import model_context
+    with model_context(exported_arch):
+        final_model = networks.searchspace_causal_cnn.CausalCNNEncoder(params['in_channels'], 
+                                                                   params['channels'], 
+                                                                   params['depth'], 
+                                                                   params['reduced_size'], 
+                                                                   params['out_channels'], 
+                                                                   params['kernel_size'])
+
+    print(final_model)
+
 
 def parse_arguments():
     parser = argparse.ArgumentParser(
@@ -172,35 +246,39 @@ if __name__ == '__main__':
     train, train_labels, test, test_labels = load_UCR_dataset(
         args.path, args.dataset
     )
-    if not args.load and not args.fit_classifier:
-        classifier = fit_hyperparameters(
-            args.hyper, train, train_labels, args.cuda, args.gpu
-        )
-    else:
-        classifier = scikit_wrappers.CausalCNNEncoderClassifier()
-        hf = open(
-            os.path.join(
-                args.save_path, args.dataset + '_hyperparameters.json'
-            ), 'r'
-        )
-        hp_dict = json.load(hf)
-        hf.close()
-        hp_dict['cuda'] = args.cuda
-        hp_dict['gpu'] = args.gpu
-        classifier.set_params(**hp_dict)
-        classifier.load(os.path.join(args.save_path, args.dataset))
+        
+    modelsearch(args.hyper, train, train_labels, args.cuda, args.gpu)
+    
+    # if not args.load and not args.fit_classifier:
+    #     print("classifier = fit_hyperparameters")
+    #     classifier = fit_hyperparameters(
+    #         args.hyper, train, train_labels, args.cuda, args.gpu
+    #     )
+    # else:
+    #     classifier = scikit_wrappers.CausalCNNEncoderClassifier()
+    #     hf = open(
+    #         os.path.join(
+    #             args.save_path, args.dataset + '_hyperparameters.json'
+    #         ), 'r'
+    #     )
+    #     hp_dict = json.load(hf)
+    #     hf.close()
+    #     hp_dict['cuda'] = args.cuda
+    #     hp_dict['gpu'] = args.gpu
+    #     classifier.set_params(**hp_dict)
+    #     classifier.load(os.path.join(args.save_path, args.dataset))
 
-    if not args.load:
-        if args.fit_classifier:
-            classifier.fit_classifier(classifier.encode(train), train_labels)
-        classifier.save(
-            os.path.join(args.save_path, args.dataset)
-        )
-        with open(
-            os.path.join(
-                args.save_path, args.dataset + '_hyperparameters.json'
-            ), 'w'
-        ) as fp:
-            json.dump(classifier.get_params(), fp)
+    # if not args.load:
+    #     if args.fit_classifier:
+    #         classifier.fit_classifier(classifier.encode(train), train_labels)
+    #     classifier.save(
+    #         os.path.join(args.save_path, args.dataset)
+    #     )
+    #     with open(
+    #         os.path.join(
+    #             args.save_path, args.dataset + '_hyperparameters.json'
+    #         ), 'w'
+    #     ) as fp:
+    #         json.dump(classifier.get_params(), fp)
 
-    print("Test accuracy: " + str(classifier.score(test, test_labels)))
+    # print("Test accuracy: " + str(classifier.score(test, test_labels)))

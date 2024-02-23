@@ -29,6 +29,11 @@ import utils
 import losses
 import networks
 
+import torch
+import nni
+from nni.nas.nn.pytorch import LayerChoice, ModelSpace, MutableDropout, MutableLinear, MutableModule, Repeat
+from nni.mutable.frozen import ensure_frozen
+
 
 class TimeSeriesEncoderClassifier(sklearn.base.BaseEstimator,
                                   sklearn.base.ClassifierMixin):
@@ -171,8 +176,10 @@ class TimeSeriesEncoderClassifier(sklearn.base.BaseEstimator,
             gamma='scale'
         )
         if train_size // nb_classes < 5 or train_size < 50 or self.penalty is not None:
+            print("classifier fit")
             return self.classifier.fit(features, y)
         else:
+            print("classifier grid_search")
             grid_search = sklearn.model_selection.GridSearchCV(
                 self.classifier, {
                     'C': [
@@ -221,6 +228,7 @@ class TimeSeriesEncoderClassifier(sklearn.base.BaseEstimator,
         @param verbose Enables, if True, to monitor which epoch is running in
                the encoder training.
         """
+        print("encoder fit")
         # Check if the given time series have unequal lengths
         varying = bool(numpy.isnan(numpy.sum(X)))
 
@@ -233,7 +241,7 @@ class TimeSeriesEncoderClassifier(sklearn.base.BaseEstimator,
             train_size = numpy.shape(X)[0]
             ratio = train_size // nb_classes
 
-        train_torch_dataset = utils.Dataset(X)
+        train_torch_dataset = torch.tensor(X)
         train_generator = torch.utils.data.DataLoader(
             train_torch_dataset, batch_size=self.batch_size, shuffle=True
         )
@@ -249,7 +257,7 @@ class TimeSeriesEncoderClassifier(sklearn.base.BaseEstimator,
         # Encoder training
         while i < self.nb_steps:
             if verbose:
-                print('Epoch: ', epochs + 1)
+                print('Encoder Epoch: ', epochs + 1)
             for batch in train_generator:
                 if self.cuda:
                     batch = batch.cuda(self.gpu)
@@ -272,6 +280,7 @@ class TimeSeriesEncoderClassifier(sklearn.base.BaseEstimator,
             if self.early_stopping is not None and y is not None and (
                 ratio >= 5 and train_size >= 50
             ):
+                print("CHECK ES")
                 # Computes the best regularization parameters
                 features = self.encode(X)
                 self.classifier = self.fit_classifier(features, y)

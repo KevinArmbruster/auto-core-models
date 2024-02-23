@@ -42,10 +42,13 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-
+import numpy
 import torch
+import torch.nn as nn
+from torch.utils.data import Dataset, DataLoader
 import nni
-from nni.nas.nn.pytorch import LayerChoice, ModelSpace, MutableDropout, MutableLinear, MutableModule, Repeat
+from nni.nas.nn.pytorch import LayerChoice, ModelSpace, MutableDropout, MutableLinear, MutableModule, Repeat, ParametrizedModule
+from nni.mutable.frozen import ensure_frozen
 
 
 class Chomp1d(torch.nn.Module):
@@ -78,7 +81,7 @@ class SqueezeChannels(torch.nn.Module):
         return x.squeeze(2)
 
 
-class CausalConvolutionBlock(MutableModule, label_prefix='CausalConvolutionBlock'):
+class CausalConvolutionBlock(ParametrizedModule):
     """
     Causal convolution block, composed sequentially of two causal convolutions
     (with leaky ReLU activation functions), and a parallel residual connection.
@@ -127,24 +130,19 @@ class CausalConvolutionBlock(MutableModule, label_prefix='CausalConvolutionBlock
             in_channels, out_channels, 1
         ) if in_channels != out_channels else None
         
-        self.activate_residual = self.add_mutable(nni.choice("Residual", [True, False]))
-
         # Final activation function
         self.relu = torch.nn.LeakyReLU() if final else None
 
     def forward(self, x):
         out_causal = self.causal(x)
-        if self.activate_residual:
-            res = x if self.upordownsample is None else self.upordownsample(x)
-        else:
-            res = 0
+        res = x if self.upordownsample is None else self.upordownsample(x)
         if self.relu is None:
             return out_causal + res
         else:
             return self.relu(out_causal + res)
 
 
-class CausalCNN(MutableModule, label_prefix='CausalCNN'):
+class CausalCNN(MutableModule):
     """
     Causal CNN, composed of a sequence of causal convolution blocks.
 
@@ -165,22 +163,24 @@ class CausalCNN(MutableModule, label_prefix='CausalCNN'):
 
         layers = []  # List of causal convolution blocks
         dilation_size = 1  # Initial dilation size
+        
+        depth = nni.choice("Depth", range(1, depth+1))
+        self.add_mutable(depth)
+        real_depth = nn.Parameter(torch.tensor(ensure_frozen(depth)), requires_grad=False)
 
-        for i in range(depth):
+        for i in range(real_depth):
             in_channels_block = in_channels if i == 0 else channels
             layers += [CausalConvolutionBlock(
                 in_channels_block, channels, kernel_size, dilation_size
             )]
             dilation_size *= 2  # Doubles the dilation size at each step
         
-        layers = Repeat(blocks=layers, depth=(1, depth), label="Depth")
-        
         # Last layer
-        last_layer = [CausalConvolutionBlock(
+        layers += [CausalConvolutionBlock(
             channels, out_channels, kernel_size, dilation_size
         )]
-
-        self.network = torch.nn.Sequential(*layers, last_layer)
+        
+        self.network = torch.nn.Sequential(*layers)
 
     def forward(self, x):
         return self.network(x)
