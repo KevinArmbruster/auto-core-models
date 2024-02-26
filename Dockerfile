@@ -35,5 +35,5 @@ ENTRYPOINT ["sleep", "infinity"]
 # SETUP INSTRUCTIONS
 # mkdir -p ~/auto-core-models/data
 # docker build -t auto-core-models-env .
-# docker run -d auto-core-models-env
+# docker run --gpus all -d auto-core-models-env
 #  -v /home/karmbruster/auto-core-models/data:/workdir/datar t
