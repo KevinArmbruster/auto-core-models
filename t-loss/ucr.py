@@ -155,40 +155,28 @@ def modelsearch(file, train, train_labels, cuda, gpu):
                                                                    params['out_channels'], 
                                                                    params['kernel_size'])
     
-    loss_func = losses.triplet_loss.TripletLoss(params['compared_length'], 
+    triplet_loss = losses.triplet_loss.TripletLoss(params['compared_length'], 
                               params['nb_random_samples'], 
                               params['negative_penalty'])
     
     from torch.utils.data import TensorDataset, DataLoader
-    import nni
-    # Dataset = nni.trace(Dataset)
-    DataLoader = nni.trace(DataLoader)
+    import nni.nas.evaluator.pytorch.lightning as pl
     
-    train_torch_dataset = TensorDataset(torch.from_numpy(train))
-    train_loader = DataLoader(train_torch_dataset, batch_size=params['batch_size'], shuffle=True)
-    optimizer = torch.optim.Adam(model_space.parameters(), lr=params['lr'])
+    train_dataset = TensorDataset(torch.from_numpy(train))
+    train_loader = pl.DataLoader(train_dataset, batch_size=params['batch_size'], shuffle=True)
+
+    module = networks.evaluator.Causal_CNN_Module(triplet_loss=triplet_loss, train_dataset=train_dataset, val_dataset=train_dataset)
+    trainer = pl.Trainer(max_steps=params['nb_steps'], 
+                         fast_dev_run=False,
+                         devices=params['gpu'],
+                         )
     
-    def fit(model, dataloader, dataset, optimizer, loss_func, nb_steps, verbose=True, cuda=True, gpu=14):
-        while i < nb_steps:
-            if verbose:
-                print('Encoder Epoch: ', epochs + 1)
-            for batch in dataloader:
-                if cuda:
-                    batch = batch.cuda(gpu)
-                optimizer.zero_grad()
-                
-                loss = loss_func(batch, model, dataset, save_memory=False)
-                
-                loss.backward()
-                optimizer.step()
-                
-                i += 1
-            epochs += 1
-        nni.report_final_result(loss)
-
-    from nni.nas.evaluator import FunctionalEvaluator
-    evaluator = FunctionalEvaluator(fit, dataloader=train_loader, dataset=train_torch_dataset, optimizer=optimizer, loss_func=loss_func, nb_steps=params['nb_steps'])
-
+    evaluator = pl.Lightning(lightning_module=module,
+                            trainer=trainer,
+                            train_dataloaders=train_loader,
+                            val_dataloaders=train_loader,
+                            )
+    
     from nni.nas.strategy import DARTS, GumbelDARTS
     strategy = DARTS()
     

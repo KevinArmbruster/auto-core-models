@@ -81,7 +81,7 @@ class SqueezeChannels(torch.nn.Module):
         return x.squeeze(2)
 
 
-class CausalConvolutionBlock(ParametrizedModule):
+class CausalConvolutionBlock(torch.nn.Module):
     """
     Causal convolution block, composed sequentially of two causal convolutions
     (with leaky ReLU activation functions), and a parallel residual connection.
@@ -142,7 +142,7 @@ class CausalConvolutionBlock(ParametrizedModule):
             return self.relu(out_causal + res)
 
 
-class CausalCNN(MutableModule):
+class CausalCNN(torch.nn.Module):
     """
     Causal CNN, composed of a sequence of causal convolution blocks.
 
@@ -164,11 +164,11 @@ class CausalCNN(MutableModule):
         layers = []  # List of causal convolution blocks
         dilation_size = 1  # Initial dilation size
         
-        depth = nni.choice("Depth", range(1, depth+1))
-        self.add_mutable(depth)
-        real_depth = nn.Parameter(torch.tensor(ensure_frozen(depth)), requires_grad=False)
+        # depth = nni.choice("Depth", range(1, depth+1))
+        # self.add_mutable(depth)
+        # real_depth = nn.Parameter(torch.tensor(ensure_frozen(depth)), requires_grad=False)
 
-        for i in range(real_depth):
+        for i in range(depth):
             in_channels_block = in_channels if i == 0 else channels
             layers += [CausalConvolutionBlock(
                 in_channels_block, channels, kernel_size, dilation_size
